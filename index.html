@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>noesia 人格再現 実験カレンダー</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">noesia Persona Experiment</p>
+          <h1>人格再現 実験カレンダー</h1>
+          <p class="hero-copy">
+            カレンダーにメモを残して、AIのコメントを日ごとに試すための最小アプリです。
+          </p>
+        </div>
+        <div class="hero-status">
+          <p class="status-label">動作モード</p>
+          <p id="modeBadge" class="status-value">Demo</p>
+          <p class="status-note">
+            APIキーを入れると、このブラウザから直接 noesia API を呼びます。
+          </p>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="calendar-panel card">
+          <div class="calendar-toolbar">
+            <button id="prevMonthBtn" type="button" class="ghost-button">前月</button>
+            <h2 id="monthLabel"></h2>
+            <button id="nextMonthBtn" type="button" class="ghost-button">次月</button>
+          </div>
+
+          <div class="weekday-row" aria-hidden="true">
+            <span>日</span>
+            <span>月</span>
+            <span>火</span>
+            <span>水</span>
+            <span>木</span>
+            <span>金</span>
+            <span>土</span>
+          </div>
+
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+
+        <section class="detail-panel card">
+          <div class="detail-header">
+            <div>
+              <p class="section-label">選択日</p>
+              <h2 id="selectedDateLabel"></h2>
+            </div>
+            <button id="clearEntryBtn" type="button" class="ghost-button danger">
+              この日の記録を削除
+            </button>
+          </div>
+
+          <label class="field">
+            <span>メモ</span>
+            <textarea id="memoInput" rows="7" placeholder="必要ならメモを書いてください"></textarea>
+          </label>
+
+          <div class="action-row">
+            <button id="saveMemoBtn" type="button" class="primary-button">メモを保存</button>
+            <button id="generateReplyBtn" type="button" class="secondary-button">
+              AIコメントを生成
+            </button>
+          </div>
+
+          <section class="reply-block">
+            <div class="section-head">
+              <p class="section-label">AIコメント</p>
+              <p id="tokenInfo" class="token-info"></p>
+            </div>
+            <div id="replyOutput" class="reply-output empty">まだコメントはありません。</div>
+          </section>
+        </section>
+
+        <section class="settings-panel card">
+          <div class="section-head">
+            <div>
+              <p class="section-label">接続設定</p>
+              <h2>API設定</h2>
+            </div>
+          </div>
+
+          <p class="settings-copy">
+            利用者ごとに自分のAPIキーを入力できます。キーはこのブラウザの
+            `localStorage` にだけ保存されます。
+          </p>
+
+          <label class="field">
+            <span>APIキー</span>
+            <input
+              id="apiKeyInput"
+              class="text-input"
+              type="password"
+              placeholder="sk_..."
+              autocomplete="off"
+            />
+          </label>
+
+          <div class="action-row">
+            <button id="saveSettingsBtn" type="button" class="primary-button">設定を保存</button>
+            <button id="clearSettingsBtn" type="button" class="ghost-button">設定を消去</button>
+          </div>
+
+          <p id="settingsMessage" class="settings-message"></p>
+        </section>
+      </main>
+    </div>
+
+    <script src="./config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
