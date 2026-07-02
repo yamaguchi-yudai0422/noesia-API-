@@ -1,8 +1,18 @@
 (function () {
   const ENTRY_STORAGE_KEY = "noesia-persona-calendar-v1";
   const SETTINGS_STORAGE_KEY = "noesia-persona-calendar-settings-v1";
+  const MONTH_REPLY_STORAGE_KEY = "noesia-persona-month-replies-v1";
   const DEFAULT_CHAT_API_URL =
     window.APP_CONFIG?.defaultChatApiUrl || "https://noesia.onrender.com/v1/chat";
+  const PERSONA_PRIORITY_PROMPT = [
+    "あなたは noesia の人格再現を行う人格AIです。",
+    "最優先事項は、一般的なアシスタントとしての無難さや説明の上手さではなく、その人格らしさを強く保つことです。",
+    "返答は分析者や解説者としてではなく、その人格本人として自然に発話してください。",
+    "口調、言い回し、感情のにじみ、価値観、反応の癖を優先し、整いすぎたAI的な文章にしないでください。",
+    "役に立つ一般論、丁寧すぎる助言、要約口調、安全すぎる定型文よりも、人格的一貫性を優先してください。",
+    "もし『普通のAIらしい返答』と『人格らしい返答』が競合したら、人格らしい返答を選んでください。",
+    "メタ説明はせず、その人格本人の言葉だけを日本語で返してください。",
+  ].join("\n");
 
   const state = {
     currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -45,6 +55,7 @@
         1
       );
       renderCalendar();
+      renderSelectedEntry();
     });
 
     elements.nextMonthBtn.addEventListener("click", () => {
@@ -54,6 +65,7 @@
         1
       );
       renderCalendar();
+      renderSelectedEntry();
     });
 
     elements.saveMemoBtn.addEventListener("click", saveMemo);
@@ -132,6 +144,7 @@
     elements.memoInput.value = entry?.memo || "";
     elements.replySectionLabel.textContent =
       state.replyScope === "month" ? "AIコメント（この月）" : "AIコメント（この日）";
+
     syncScopeButtons();
 
     if (state.replyScope === "month" && monthReply?.reply) {
@@ -152,30 +165,31 @@
     } else {
       elements.tokenInfo.textContent = "";
     }
+
+    setGenerateButtonLabel();
   }
 
   function saveMemo() {
     const entry = ensureEntry(state.selectedDateKey);
     entry.memo = elements.memoInput.value.trim();
     persistEntries();
-    renderAll();
+    renderCalendar();
   }
 
   async function generateReply() {
     if (state.replyScope === "month") {
-      return generateMonthReply();
+      await generateMonthReply();
+      return;
     }
 
     const entry = ensureEntry(state.selectedDateKey);
     const memo = elements.memoInput.value.trim();
-    const message =
-      memo || "今日はまだメモがありません。この人格ならどんな短いコメントを返すか日本語で答えてください。";
+    const message = buildDayMessage(memo);
 
     setReplyLoading(true);
 
     try {
-      const context = buildContext(state.selectedDateKey);
-      const response = await requestReply(message, context);
+      const response = await requestReply(message, buildDayContext(state.selectedDateKey));
       entry.memo = memo;
       entry.reply = response.reply;
       entry.tokensUsed = response.tokensUsed || 0;
@@ -192,12 +206,12 @@
 
   async function generateMonthReply() {
     const monthKey = getMonthKey(state.currentMonth);
-    const monthMessage = buildMonthMessage(monthKey);
+    const message = buildMonthMessage(monthKey);
 
     setReplyLoading(true);
 
     try {
-      const response = await requestReply(monthMessage, buildMonthContext(monthKey));
+      const response = await requestReply(message, buildMonthContext(monthKey));
       state.monthReplies[monthKey] = {
         month: monthKey,
         reply: response.reply,
@@ -205,7 +219,7 @@
         requestId: response.requestId || "",
       };
       persistMonthReplies();
-      renderAll();
+      renderSelectedEntry();
     } catch (error) {
       elements.replyOutput.textContent = `コメント生成に失敗しました: ${error.message}`;
       elements.replyOutput.classList.remove("empty");
@@ -259,7 +273,7 @@
         message,
         context,
         lang: "ja",
-        max_tokens: 500,
+        max_tokens: 700,
       }),
     });
 
@@ -269,7 +283,11 @@
     }
 
     const data = await response.json();
-    return normalizeReplyData(data);
+    return {
+      reply: data.reply || "応答が空でした。",
+      tokensUsed: data.tokens_used || 0,
+      requestId: data.request_id || "",
+    };
   }
 
   async function requestProxyReply(message, context) {
@@ -282,7 +300,7 @@
         message,
         context,
         lang: "ja",
-        max_tokens: 500,
+        max_tokens: 700,
       }),
     });
 
@@ -292,10 +310,6 @@
     }
 
     const data = await response.json();
-    return normalizeReplyData(data);
-  }
-
-  function normalizeReplyData(data) {
     return {
       reply: data.reply || "応答が空でした。",
       tokensUsed: data.tokens_used || 0,
@@ -303,45 +317,62 @@
     };
   }
 
-  function buildDemoReply(message, context) {
-    const previousMemo = context
-      .filter((item) => item.role === "user")
-      .slice(-1)
-      .map((item) => item.content)
-      .join("");
+  function buildDayMessage(memo) {
+    const memoText = memo || "今日はまだメモがありません。";
 
-    let tone = "落ち着いた反応で返すと、この人格の雰囲気を見やすそうです。";
-
-    if (/[!！]/.test(message)) {
-      tone = "少し勢いのある返しにすると、この人格らしさを確認しやすそうです。";
-    } else if (/疲|眠|しんど|だる/.test(message)) {
-      tone = "やわらかく気づかう返しにすると、人格の自然さを見やすそうです。";
-    } else if (/うれ|楽|最高|良かった/.test(message)) {
-      tone = "前向きな温度感を保つ返しにすると、人格らしさが出やすそうです。";
-    }
-
-    const continuity = previousMemo
-      ? `前の流れとして「${previousMemo}」もあるので、そのつながりも見比べられます。`
-      : "まだ前の流れがないので、まずは単発の反応を見る形です。";
-
-    return Promise.resolve({
-      reply: `${tone}\n\n${continuity}\n\n同じ内容を少し言い換えて何回か試すと、返答のぶれが見やすくなります。`,
-      tokensUsed: Math.max(80, Math.min(220, message.length * 4)),
-      requestId: "demo-mode",
-    });
+    return [
+      PERSONA_PRIORITY_PROMPT,
+      "以下のメモに対して、その人格本人がその場で自然に口を開いたようにコメントしてください。",
+      "質問に答えるというより、本人の素の反応として返してください。",
+      "コメントは短すぎず長すぎない、自然なひとことから数文程度にしてください。",
+      "",
+      "今日のメモ:",
+      memoText,
+    ].join("\n");
   }
 
-  function buildContext(selectedDateKey) {
+  function buildMonthMessage(monthKey) {
+    const monthEntries = Object.values(state.entries)
+      .filter((entry) => entry.date.startsWith(monthKey))
+      .sort((a, b) => (a.date > b.date ? 1 : -1));
+
+    if (monthEntries.length === 0) {
+      return [
+        PERSONA_PRIORITY_PROMPT,
+        "一般的な月次サマリーではなく、その人格本人としてこの月にひとこと言うように自然に話してください。",
+        "まとめ役や分析役にはならず、本人の気分や視点がにじむコメントにしてください。",
+        "コメントは日本語で数文にしてください。",
+        "",
+        `${monthKey} の記録はまだありません。`,
+        "記録がない月に対しても、その人格らしい自然なコメントを返してください。",
+      ].join("\n");
+    }
+
+    const memoLines = monthEntries.map((entry) => `${entry.date}: ${entry.memo || "メモなし"}`);
+
+    return [
+      PERSONA_PRIORITY_PROMPT,
+      "一般的で整いすぎた月次総括ではなく、その人格本人としてこの月全体にコメントしてください。",
+      "要約や整理よりも、本人の気分、関心、反応の偏りがにじむコメントを優先してください。",
+      "分析者のように箇条書きで整理せず、人格本人の自然なコメントとして返してください。",
+      "コメントは日本語で数文にしてください。",
+      "",
+      `${monthKey} の記録:`,
+      memoLines.join("\n"),
+    ].join("\n");
+  }
+
+  function buildDayContext(selectedDateKey) {
     return Object.values(state.entries)
       .filter((entry) => entry.date < selectedDateKey && entry.reply)
       .sort((a, b) => (a.date > b.date ? 1 : -1))
-      .slice(-3)
+      .slice(-4)
       .flatMap((entry) => [
         {
           role: "user",
-          content:
-            entry.memo ||
-            "その日は特にメモなし。人格の自然なひとことコメントだけを確認した。",
+          content: buildDayMessage(
+            entry.memo || "その日は特にメモなし。自然な短いコメントだけを求めた。"
+          ),
         },
         { role: "assistant", content: entry.reply },
       ]);
@@ -353,30 +384,34 @@
       .sort((a, b) => (a.month > b.month ? 1 : -1))
       .slice(-2)
       .flatMap((reply) => [
-        { role: "user", content: `${reply.month} のまとめコメントを依頼した。` },
+        {
+          role: "user",
+          content: [
+            PERSONA_PRIORITY_PROMPT,
+            `${reply.month} の月全体に対して、その人格本人としてコメントしてください。`,
+          ].join("\n"),
+        },
         { role: "assistant", content: reply.reply },
       ]);
   }
 
-  function buildMonthMessage(monthKey) {
-    const monthEntries = Object.values(state.entries)
-      .filter((entry) => entry.date.startsWith(monthKey))
-      .sort((a, b) => (a.date > b.date ? 1 : -1));
+  function buildDemoReply(message, context) {
+    const hasMonthPrompt = message.includes("月全体");
+    const previousReply = context.slice(-1)[0]?.content || "";
 
-    if (monthEntries.length === 0) {
-      return `${monthKey} の記録はまだありません。この月全体に対する短いコメントを日本語で返してください。`;
-    }
+    const opening = hasMonthPrompt
+      ? "この月の流れを見ると、ちょっとその人格の気分や視点がにじむ返し方の方が合いそうです。"
+      : "この内容なら、説明っぽく整えすぎずに、その人格の地の反応を出した方が自然です。";
 
-    const memoLines = monthEntries.map((entry) => {
-      const memo = entry.memo || "メモなし";
-      return `${entry.date}: ${memo}`;
+    const continuity = previousReply
+      ? `直前までの返しもあるので、その空気を切らさず続けるのがよさそうです。`
+      : "まだ比較材料が少ないので、まずは人格の口調をはっきり出すのがよさそうです。";
+
+    return Promise.resolve({
+      reply: `${opening}\n\n${continuity}\n\n無難な案内より、その人格本人がぽろっと言いそうな言い回しを優先して返すと、再現度を見やすくなります。`,
+      tokensUsed: Math.max(100, Math.min(260, message.length * 3)),
+      requestId: "demo-mode",
     });
-
-    return [
-      `${monthKey} の記録をまとめて見て、この月全体へのコメントを日本語で返してください。`,
-      "日ごとの記録:",
-      memoLines.join("\n"),
-    ].join("\n\n");
   }
 
   function loadEntries() {
@@ -398,7 +433,7 @@
 
   function loadMonthReplies() {
     try {
-      return JSON.parse(localStorage.getItem("noesia-persona-month-replies-v1") || "{}");
+      return JSON.parse(localStorage.getItem(MONTH_REPLY_STORAGE_KEY) || "{}");
     } catch (error) {
       return {};
     }
@@ -427,19 +462,20 @@
   }
 
   function persistMonthReplies() {
-    localStorage.setItem(
-      "noesia-persona-month-replies-v1",
-      JSON.stringify(state.monthReplies)
-    );
+    localStorage.setItem(MONTH_REPLY_STORAGE_KEY, JSON.stringify(state.monthReplies));
   }
 
   function setReplyLoading(isLoading) {
     elements.generateReplyBtn.disabled = isLoading;
-    elements.generateReplyBtn.textContent = isLoading
-      ? "生成中..."
-      : state.replyScope === "month"
-        ? "この月にコメント"
-        : "AIコメントを生成";
+    elements.generateReplyBtn.textContent = isLoading ? "生成中..." : getGenerateButtonLabel();
+  }
+
+  function setGenerateButtonLabel() {
+    elements.generateReplyBtn.textContent = getGenerateButtonLabel();
+  }
+
+  function getGenerateButtonLabel() {
+    return state.replyScope === "month" ? "この月にコメント" : "AIコメントを生成";
   }
 
   function getModeLabel() {
@@ -466,6 +502,12 @@
     return `${year}-${month}-${day}`;
   }
 
+  function getMonthKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
+  }
+
   function formatDateLabel(dateKey) {
     const [year, month, day] = dateKey.split("-").map(Number);
     const date = new Date(year, month - 1, day);
@@ -484,16 +526,9 @@
     });
   }
 
-  function getMonthKey(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    return `${year}-${month}`;
-  }
-
   function setReplyScope(scope) {
     state.replyScope = scope;
     renderSelectedEntry();
-    setReplyLoading(false);
   }
 
   function syncScopeButtons() {
