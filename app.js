@@ -9,6 +9,8 @@
     selectedDateKey: toDateKey(new Date()),
     entries: loadEntries(),
     settings: loadSettings(),
+    monthReplies: loadMonthReplies(),
+    replyScope: "day",
   };
 
   const elements = {
@@ -18,10 +20,13 @@
     selectedDateLabel: document.getElementById("selectedDateLabel"),
     memoInput: document.getElementById("memoInput"),
     replyOutput: document.getElementById("replyOutput"),
+    replySectionLabel: document.getElementById("replySectionLabel"),
     tokenInfo: document.getElementById("tokenInfo"),
     apiKeyInput: document.getElementById("apiKeyInput"),
     saveSettingsBtn: document.getElementById("saveSettingsBtn"),
     clearSettingsBtn: document.getElementById("clearSettingsBtn"),
+    dayScopeBtn: document.getElementById("dayScopeBtn"),
+    monthScopeBtn: document.getElementById("monthScopeBtn"),
     settingsMessage: document.getElementById("settingsMessage"),
     prevMonthBtn: document.getElementById("prevMonthBtn"),
     nextMonthBtn: document.getElementById("nextMonthBtn"),
@@ -56,6 +61,8 @@
     elements.clearEntryBtn.addEventListener("click", clearEntry);
     elements.saveSettingsBtn.addEventListener("click", saveSettings);
     elements.clearSettingsBtn.addEventListener("click", clearSettings);
+    elements.dayScopeBtn.addEventListener("click", () => setReplyScope("day"));
+    elements.monthScopeBtn.addEventListener("click", () => setReplyScope("month"));
 
     renderAll();
   }
@@ -119,11 +126,18 @@
 
   function renderSelectedEntry() {
     const entry = state.entries[state.selectedDateKey];
+    const monthReply = state.monthReplies[getMonthKey(state.currentMonth)];
 
     elements.selectedDateLabel.textContent = formatDateLabel(state.selectedDateKey);
     elements.memoInput.value = entry?.memo || "";
+    elements.replySectionLabel.textContent =
+      state.replyScope === "month" ? "AIコメント（この月）" : "AIコメント（この日）";
+    syncScopeButtons();
 
-    if (entry?.reply) {
+    if (state.replyScope === "month" && monthReply?.reply) {
+      elements.replyOutput.textContent = monthReply.reply;
+      elements.replyOutput.classList.remove("empty");
+    } else if (state.replyScope === "day" && entry?.reply) {
       elements.replyOutput.textContent = entry.reply;
       elements.replyOutput.classList.remove("empty");
     } else {
@@ -131,7 +145,13 @@
       elements.replyOutput.classList.add("empty");
     }
 
-    elements.tokenInfo.textContent = entry?.tokensUsed ? `tokens: ${entry.tokensUsed}` : "";
+    if (state.replyScope === "month" && monthReply?.tokensUsed) {
+      elements.tokenInfo.textContent = `tokens: ${monthReply.tokensUsed}`;
+    } else if (state.replyScope === "day" && entry?.tokensUsed) {
+      elements.tokenInfo.textContent = `tokens: ${entry.tokensUsed}`;
+    } else {
+      elements.tokenInfo.textContent = "";
+    }
   }
 
   function saveMemo() {
@@ -142,6 +162,10 @@
   }
 
   async function generateReply() {
+    if (state.replyScope === "month") {
+      return generateMonthReply();
+    }
+
     const entry = ensureEntry(state.selectedDateKey);
     const memo = elements.memoInput.value.trim();
     const message =
@@ -157,6 +181,30 @@
       entry.tokensUsed = response.tokensUsed || 0;
       entry.requestId = response.requestId || "";
       persistEntries();
+      renderAll();
+    } catch (error) {
+      elements.replyOutput.textContent = `コメント生成に失敗しました: ${error.message}`;
+      elements.replyOutput.classList.remove("empty");
+    } finally {
+      setReplyLoading(false);
+    }
+  }
+
+  async function generateMonthReply() {
+    const monthKey = getMonthKey(state.currentMonth);
+    const monthMessage = buildMonthMessage(monthKey);
+
+    setReplyLoading(true);
+
+    try {
+      const response = await requestReply(monthMessage, buildMonthContext(monthKey));
+      state.monthReplies[monthKey] = {
+        month: monthKey,
+        reply: response.reply,
+        tokensUsed: response.tokensUsed || 0,
+        requestId: response.requestId || "",
+      };
+      persistMonthReplies();
       renderAll();
     } catch (error) {
       elements.replyOutput.textContent = `コメント生成に失敗しました: ${error.message}`;
@@ -299,6 +347,38 @@
       ]);
   }
 
+  function buildMonthContext(currentMonthKey) {
+    return Object.values(state.monthReplies)
+      .filter((reply) => reply.month < currentMonthKey && reply.reply)
+      .sort((a, b) => (a.month > b.month ? 1 : -1))
+      .slice(-2)
+      .flatMap((reply) => [
+        { role: "user", content: `${reply.month} のまとめコメントを依頼した。` },
+        { role: "assistant", content: reply.reply },
+      ]);
+  }
+
+  function buildMonthMessage(monthKey) {
+    const monthEntries = Object.values(state.entries)
+      .filter((entry) => entry.date.startsWith(monthKey))
+      .sort((a, b) => (a.date > b.date ? 1 : -1));
+
+    if (monthEntries.length === 0) {
+      return `${monthKey} の記録はまだありません。この月全体に対する短いコメントを日本語で返してください。`;
+    }
+
+    const memoLines = monthEntries.map((entry) => {
+      const memo = entry.memo || "メモなし";
+      return `${entry.date}: ${memo}`;
+    });
+
+    return [
+      `${monthKey} の記録をまとめて見て、この月全体へのコメントを日本語で返してください。`,
+      "日ごとの記録:",
+      memoLines.join("\n"),
+    ].join("\n\n");
+  }
+
   function loadEntries() {
     try {
       return JSON.parse(localStorage.getItem(ENTRY_STORAGE_KEY) || "{}");
@@ -313,6 +393,14 @@
       return { apiKey: parsed.apiKey || "" };
     } catch (error) {
       return { apiKey: "" };
+    }
+  }
+
+  function loadMonthReplies() {
+    try {
+      return JSON.parse(localStorage.getItem("noesia-persona-month-replies-v1") || "{}");
+    } catch (error) {
+      return {};
     }
   }
 
@@ -338,9 +426,20 @@
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
   }
 
+  function persistMonthReplies() {
+    localStorage.setItem(
+      "noesia-persona-month-replies-v1",
+      JSON.stringify(state.monthReplies)
+    );
+  }
+
   function setReplyLoading(isLoading) {
     elements.generateReplyBtn.disabled = isLoading;
-    elements.generateReplyBtn.textContent = isLoading ? "生成中..." : "AIコメントを生成";
+    elements.generateReplyBtn.textContent = isLoading
+      ? "生成中..."
+      : state.replyScope === "month"
+        ? "この月にコメント"
+        : "AIコメントを生成";
   }
 
   function getModeLabel() {
@@ -383,5 +482,22 @@
       year: "numeric",
       month: "long",
     });
+  }
+
+  function getMonthKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
+  }
+
+  function setReplyScope(scope) {
+    state.replyScope = scope;
+    renderSelectedEntry();
+    setReplyLoading(false);
+  }
+
+  function syncScopeButtons() {
+    elements.dayScopeBtn.classList.toggle("is-active", state.replyScope === "day");
+    elements.monthScopeBtn.classList.toggle("is-active", state.replyScope === "month");
   }
 })();

@@ -224,7 +224,8 @@ textarea:focus,
 
 .primary-button,
 .secondary-button,
-.ghost-button {
+.ghost-button,
+.scope-button {
   border: 0;
   border-radius: 14px;
   padding: 12px 16px;
@@ -234,7 +235,8 @@ textarea:focus,
 
 .primary-button:hover,
 .secondary-button:hover,
-.ghost-button:hover {
+.ghost-button:hover,
+.scope-button:hover {
   transform: translateY(-1px);
 }
 
@@ -256,6 +258,23 @@ textarea:focus,
 .ghost-button.danger {
   color: var(--danger);
   background: rgba(151, 61, 61, 0.08);
+}
+
+.scope-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.scope-button {
+  background: rgba(140, 79, 42, 0.08);
+  color: var(--primary-strong);
+}
+
+.scope-button.is-active {
+  background: var(--primary);
+  color: #fff;
 }
 
 .reply-block {

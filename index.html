@@ -69,9 +69,14 @@
             </button>
           </div>
 
+          <div class="scope-row" role="group" aria-label="コメント範囲">
+            <button id="dayScopeBtn" type="button" class="scope-button is-active">この日</button>
+            <button id="monthScopeBtn" type="button" class="scope-button">この月</button>
+          </div>
+
           <section class="reply-block">
             <div class="section-head">
-              <p class="section-label">AIコメント</p>
+              <p id="replySectionLabel" class="section-label">AIコメント</p>
               <p id="tokenInfo" class="token-info"></p>
             </div>
             <div id="replyOutput" class="reply-output empty">まだコメントはありません。</div>
